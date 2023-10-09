@@ -57,12 +57,17 @@ extern FLB_TLS_DEFINE(struct flb_log, flb_log_ctx)
 #define FLB_LOG_CACHE_ENTRIES        10
 #define FLB_LOG_CACHE_TEXT_BUF_SIZE  1024
 
+/* Logging Limits */
+#define FLB_LOGFILE_MAX_HISTORY     255
+
 /* Logging main context */
 struct flb_log {
     struct mk_event event;     /* worker event for manager */
     flb_pipefd_t ch_mng[2];    /* worker channel manager   */
     uint16_t type;             /* log type                 */
     uint16_t level;            /* level                    */
+    off_t max_size_limit;      /* max size of a single log file in B */
+    uint8_t max_history;       /* max log files to be retained */
     char *out;                 /* FLB_LOG_FILE or FLB_LOG_SOCKET */
     pthread_t tid;             /* thread ID   */
     struct flb_worker *worker; /* non-real worker reference */
@@ -114,11 +119,14 @@ static inline int flb_log_check(int l) {
 }
 
 struct flb_log *flb_log_create(struct flb_config *config, int type,
-                               int level, char *out);
+                             int level, off_t max_size_limit, 
+                             uint8_t max_history, char *out);
 int flb_log_set_level(struct flb_config *config, int level);
 int flb_log_get_level_str(char *str);
 
 int flb_log_set_file(struct flb_config *config, char *out);
+int flb_log_set_history(struct flb_config *config, uint8_t max_history);
+int flb_log_set_size(struct flb_config *config, off_t max_size_limit);
 
 int flb_log_destroy(struct flb_log *log, struct flb_config *config);
 void flb_log_print(int type, const char *file, int line, const char *fmt, ...) FLB_FORMAT_PRINTF(4, 5);

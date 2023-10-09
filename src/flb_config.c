@@ -82,6 +82,14 @@ struct flb_service_config service_configs[] = {
      FLB_CONF_TYPE_STR,
      offsetof(struct flb_config, log)},
 
+    {FLB_CONF_STR_LOGFILE_SIZE_LIMIT,
+     FLB_CONF_TYPE_STR,
+     offsetof(struct flb_config, log_file_size_limit)},
+
+    {FLB_CONF_STR_LOGFILE_HISTORY_LIMIT,
+     FLB_CONF_TYPE_INT,
+     offsetof(struct flb_config, log_file_history)},
+
 #ifdef FLB_HAVE_HTTP_SERVER
     {FLB_CONF_STR_HTTP_SERVER,
      FLB_CONF_TYPE_BOOL,
@@ -593,6 +601,19 @@ static int set_log_level(struct flb_config *config, const char *v_str)
     return 0;
 }
 
+static int set_log_file_size_limit(struct flb_config *config, const char *v_str) {  
+    if (v_str != NULL) {
+        off_t log_file_size_limit;
+        
+        log_file_size_limit = flb_utils_size_to_bytes(v_str);
+        if (log_file_size_limit == -1) {
+            return -1;
+        }
+        config->log_file_size_limit = log_file_size_limit;
+    }
+    return 0;
+}
+
 int set_log_level_from_env(struct flb_config *config)
 {
     const char *val = NULL;
@@ -645,6 +666,12 @@ int flb_config_set_property(struct flb_config *config,
             else if (!strncasecmp(key, FLB_CONF_STR_PLUGINS_FILE, 32)) {
                 tmp = flb_env_var_translate(config->env, v);
                 ret = flb_plugin_load_config_file(tmp, config);
+                flb_sds_destroy(tmp);
+                tmp = NULL;
+            }
+            else if (!strncasecmp(key, FLB_CONF_STR_LOGFILE_SIZE_LIMIT, 32)) {
+                tmp = flb_env_var_translate(config->env, v);
+                ret = set_log_file_size_limit(config, tmp);
                 flb_sds_destroy(tmp);
                 tmp = NULL;
             }

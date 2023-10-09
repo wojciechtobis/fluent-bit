@@ -62,10 +62,90 @@ static inline int consume_byte(flb_pipefd_t fd)
     return 0;
 }
 
+static inline int should_rotate_log_file(off_t size, struct flb_log *log)
+{
+    if (log->max_size_limit == 0) {
+        /*
+         * No limit set.
+         * Never rotate log files.
+         */
+        return FLB_FALSE;
+    }
+
+    if (size >= log->max_size_limit) {
+        return FLB_TRUE;
+    }
+
+    return FLB_FALSE;
+}
+
+static inline void log_file_rotate(struct flb_log *log)
+{
+    char *backup_file_name = NULL;
+    char *src_file_name = NULL;
+    int ret = -1;
+    int i;
+
+    if (log->max_history == 0) {
+        /*
+         * No backups.
+         * Remove the file since size has exceeded.
+         */
+        remove(log->out);
+        return;
+    }
+
+    size_t filename_len = snprintf(NULL, 0, "%s.%d", log->out, log->max_history) + 1;
+    backup_file_name = flb_malloc(filename_len);
+    if (!backup_file_name) {
+        flb_errno();
+        return;
+    }
+    src_file_name = flb_malloc(filename_len);
+    if (!src_file_name) {
+        flb_free(backup_file_name);
+        flb_errno();
+        return;
+    }
+
+    for (i = log->max_history; i > 1; i--) {
+        snprintf(backup_file_name, filename_len, "%s.%d", log->out, i);
+        snprintf(src_file_name, filename_len, "%s.%d", log->out, i-1);
+        /* since rename behaviour is implementation dependent when new file exists, remove the last file. */
+        if (i == log->max_history) {
+            if (access(backup_file_name, R_OK) == 0) {
+                remove(backup_file_name);
+            }
+        }
+        if (access(src_file_name, R_OK) == 0) {
+            ret = rename(src_file_name, backup_file_name);
+            if (ret != 0) {
+                /* find better way to handle unsuccessful renaming */
+                remove(src_file_name);
+                flb_errno();
+            }
+        }
+    }
+
+    snprintf(backup_file_name, filename_len, "%s.1", log->out);
+    ret = rename(log->out, backup_file_name);
+    if (ret != 0) {
+        /* find better way to handle unsuccessful renaming */  
+        remove(log->out);
+        flb_errno();
+    }
+
+    flb_free(backup_file_name);
+    flb_free(src_file_name);
+}
+
 static inline int log_push(struct log_message *msg, struct flb_log *log)
 {
     int fd;
     int ret = -1;
+    int status = -1;
+    off_t size;
+    struct stat buf;
 
     if (log->type == FLB_LOG_STDERR) {
         return write(STDERR_FILENO, msg->msg, msg->size);
@@ -78,7 +158,18 @@ static inline int log_push(struct log_message *msg, struct flb_log *log)
             return write(STDERR_FILENO, msg->msg, msg->size);
         }
         ret = write(fd, msg->msg, msg->size);
+        /* Let's check the size before closing as we have open file descriptor. */
+        status = fstat(fd, &buf);
+        if (status == -1) {
+            flb_errno();
+            close(fd);
+            return ret;
+        }
         close(fd);
+        size = buf.st_size;
+        if (should_rotate_log_file(size, log)) {
+            log_file_rotate(log);
+        }
     }
 
     return ret;
@@ -383,8 +474,21 @@ int flb_log_set_file(struct flb_config *config, char *out)
     return 0;
 }
 
+int flb_log_set_history(struct flb_config *config, uint8_t max_history)
+{
+    config->log->max_history = max_history;
+    return 0;
+}
+
+int flb_log_set_size(struct flb_config *config, off_t max_size_limit)
+{
+    config->log->max_size_limit = max_size_limit;
+    return 0;
+}
+
 struct flb_log *flb_log_create(struct flb_config *config, int type,
-                               int level, char *out)
+                             int level, off_t max_size_limit, 
+                             uint8_t max_history, char *out)
 {
     int ret;
     struct flb_log *log;
@@ -410,6 +514,8 @@ struct flb_log *flb_log_create(struct flb_config *config, int type,
     /* Prepare logging context */
     log->type  = type;
     log->level = level;
+    log->max_size_limit = max_size_limit;
+    log->max_history = max_history;
     log->out   = out;
     log->evl   = evl;
     log->tid   = 0;
